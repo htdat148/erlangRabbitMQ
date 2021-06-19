@@ -12,7 +12,8 @@
 -include_lib("amqp_client/include/amqp_client.hrl").
 
 %% API
--export([send_msg/2]).
+-export([send_msg/2, add_routing_keys/2,
+         get_worker_info/1, add_routing_keys/2]).
 
 %% this function is used to send msg to default exchange
 %% msg is atom for direct and fanout types
@@ -50,3 +51,16 @@ send_msg(TypeAtom, Msg) ->
   amqp_connection:close(Connection),
   ok.
 
+
+get_worker_info(Type) ->
+  WorkerRef = get_worker_ref(Type),
+  Reply = gen_server:call(WorkerRef, get_worker_info),
+  Reply.
+
+add_routing_keys(Type, RoutingKeys) ->
+  WorkerRef = get_worker_ref(Type),
+  gen_server:cast(WorkerRef, {add_keys_to_existing_queue, RoutingKeys}).
+
+get_worker_ref(Type) ->
+  [Worker | _] = application:get_env(rabbit, Type, []),
+  list_to_atom(Worker).

@@ -24,7 +24,11 @@
 
 -define(SERVER, ?MODULE).
 
--record(rabbit_worker_state, {channel,type, routing_keys}).
+-record(rabbit_worker_state, {channel = undefined,
+                              exchange = undefined,
+                              queue = undefined,
+                              type = undefined,
+                              routing_keys = []}).
 
 %%%===================================================================
 %%% API
@@ -42,7 +46,6 @@ start_link(Name, Exchange, Type, RoutingKey) ->
 
 %% Exchange, Mode, RoutingKey must be binary
 init([Exchange, Type, RoutingKey]) ->
-
   %%  start a connection
   %%  default amqp_params_network host is localhost
   {ok, Connection} = amqp_connection:start(#amqp_params_network{}),
@@ -65,7 +68,9 @@ init([Exchange, Type, RoutingKey]) ->
   % in case this process crash or hang, handled by handle_info
   proc_lib:spawn_link(?MODULE, subscribe, [Channel, Queue]),
 
-  {ok, #rabbit_worker_state{channel = Channel, type = Type, routing_keys = RoutingKey}}.
+  {ok, #rabbit_worker_state{channel = Channel, queue = Queue, type = Type,
+                            exchange = Exchange, routing_keys = [RoutingKey]}}.
+
 
 %% @private
 %% @doc Handling call messages
@@ -77,6 +82,15 @@ init([Exchange, Type, RoutingKey]) ->
   {noreply, NewState :: #rabbit_worker_state{}, timeout() | hibernate} |
   {stop, Reason :: term(), Reply :: term(), NewState :: #rabbit_worker_state{}} |
   {stop, Reason :: term(), NewState :: #rabbit_worker_state{}}).
+
+handle_call(get_worker_info, _From, State) ->
+  #rabbit_worker_state{ channel = Channel,
+                        queue = Queue,
+                        exchange = Exchange,
+                        routing_keys = RoutingKeys} = State,
+  Info = [{channel, Channel}, {queue, Queue}, {exchange, Exchange}, {routing_keys, RoutingKeys}],
+  {reply, Info, State};
+
 handle_call(_Request, _From, State = #rabbit_worker_state{}) ->
   {reply, ok, State}.
 
@@ -86,6 +100,22 @@ handle_call(_Request, _From, State = #rabbit_worker_state{}) ->
   {noreply, NewState :: #rabbit_worker_state{}} |
   {noreply, NewState :: #rabbit_worker_state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #rabbit_worker_state{}}).
+handle_cast({add_keys_to_existing_queue, NewKeys}, State) ->
+  #rabbit_worker_state{channel = Channel,
+                       queue = Queue,
+                       exchange = Exchange,
+                       routing_keys = RoutingKeys} = State,
+
+  %% binding to queue to routing key
+  lists:map(fun(NewKey) ->
+                  Binding = #'queue.bind'{queue       = Queue,
+                                          exchange    = Exchange,
+                                          routing_key = list_to_binary(NewKey)},
+                  amqp_channel:call(Channel, Binding)
+            end, NewKeys),
+
+    {noreply, State#rabbit_worker_state{routing_keys = RoutingKeys ++ NewKeys}};
+
 handle_cast(_Request, State = #rabbit_worker_state{}) ->
   {noreply, State}.
 

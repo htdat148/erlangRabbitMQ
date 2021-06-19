@@ -7,7 +7,7 @@
 
 -behaviour(supervisor).
 
--export([start_link/0]).
+-export([start_link/0, config_rabbit_child/1]).
 
 -export([init/1]).
 
@@ -37,3 +37,4 @@ config_rabbit_child(Type) ->
     shutdown => brutal_kill,
     type => worker,
     modules => [rabbit_worker]}.
+
