@@ -75,7 +75,7 @@ init([Exchange, Queue]) ->
 handle_call(get_queue_info, _From, State) ->
   Reply = State,
   {reply, Reply, State};
-handle_call({add_routing_key_to_queue, NewRoutingKeys, Queue}, _From,
+handle_call({bind_routing_key_to_queue, NewRoutingKeys, Queue}, _From,
             State) ->
   #queue_handler_state{channel = Channel, exchange = Exchange, routing_keys = RoutingKeys} = State,
 
@@ -87,7 +87,21 @@ handle_call({add_routing_key_to_queue, NewRoutingKeys, Queue}, _From,
               amqp_channel:call(Channel, Binding)
             end, NewRoutingKeys),
 
-  {reply, {adding_successfully, NewRoutingKeys}, State#queue_handler_state{routing_keys = RoutingKeys ++ NewRoutingKeys}};
+  {reply, {binding_successfully, NewRoutingKeys}, State#queue_handler_state{routing_keys = RoutingKeys ++ NewRoutingKeys}};
+
+handle_call({unbind_routing_key_to_queue, NewRoutingKeys, Queue}, _From,
+            State) ->
+  #queue_handler_state{channel = Channel, exchange = Exchange, routing_keys = RoutingKeys} = State,
+
+  %% binding to queue to routing key
+  lists:map(fun(NewRoutingKey) ->
+              Binding = #'queue.unbind'{queue     = Queue,
+                                      exchange    = Exchange,
+                                      routing_key = NewRoutingKey},
+              amqp_channel:call(Channel, Binding)
+            end, NewRoutingKeys),
+
+  {reply, {unbinding_successfully, NewRoutingKeys}, State#queue_handler_state{routing_keys = RoutingKeys -- NewRoutingKeys}};
 
 handle_call(_Request, _From, State = #queue_handler_state{}) ->
   {reply, ok, State}.

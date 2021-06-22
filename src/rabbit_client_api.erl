@@ -13,7 +13,8 @@
 
 %% API
 -export([send_msg/3, add_queue_to_exchange/2,
-         add_routing_key_to_queue/2, get_queue_info/1]).
+         bind_routing_key_to_queue/2, get_queue_info/1,
+         unbind_routing_key_to_queue/2]).
 
 %% this function is used to send msg to default exchange
 %% msg is atom for direct and fanout types
@@ -29,7 +30,6 @@ send_msg(ExchangeStr, RoutingKeyStrs, MsgStr) ->
   Msg = list_to_binary(MsgStr),
 
   lists:map(fun(RoutingKey) ->
-
                   Publish = #'basic.publish'{exchange = Exchange, routing_key = RoutingKey},
                   amqp_channel:cast(Channel, Publish, #amqp_msg{payload = Msg})
             end, RoutingKeys),
@@ -42,11 +42,15 @@ add_queue_to_exchange(Exchange, Queue) ->
   supervisor:start_child(list_to_atom(Exchange ++ "_exchange_handler"), [ Queue]).
 
 %% If queue not exist, create queue
-add_routing_key_to_queue(RoutingKeys, Queue) ->
+bind_routing_key_to_queue(RoutingKeys, Queue) ->
   Reply = gen_server:call(list_to_atom(Queue ++ "_queue_handler"),
-                  {add_routing_key_to_queue, str_to_bin(RoutingKeys), list_to_binary(Queue)}),
+                  {bind_routing_key_to_queue, str_to_bin(RoutingKeys), list_to_binary(Queue)}),
   Reply.
 
+unbind_routing_key_to_queue(RoutingKeys, Queue) ->
+  Reply = gen_server:call(list_to_atom(Queue ++ "_queue_handler"),
+                  {unbind_routing_key_to_queue, str_to_bin(RoutingKeys), list_to_binary(Queue)}),
+  Reply.
 get_queue_info(Queue) ->
   Reply = gen_server:call(list_to_atom(Queue ++ "_queue_handler"), get_queue_info),
   Reply.
