@@ -12,45 +12,38 @@
 -include_lib("amqp_client/include/amqp_client.hrl").
 
 %% API
--export([send_msg/2, add_routing_keys/2,
+-export([send_msg/3, add_queue_to_exchange/3,
+         add_routing_key_to_queue/3,
          get_worker_info/1, add_routing_keys/2]).
 
 %% this function is used to send msg to default exchange
 %% msg is atom for direct and fanout types
 %% msg is a {Topic, Content} for topic type
-send_msg(TypeAtom, Msg) ->
-
-  [_Worker, Exchange, Type, RoutingKey ] = [list_to_binary(Element) ||
-                                            Element <- application:get_env(rabbit, TypeAtom, [])],
-
-  {RoutingKey_1, Payload} =
-    case TypeAtom of
-      topic ->
-        % TODO handles the case MSg not a tuple
-        {Topic, Content} = Msg,
-        {list_to_binary(Topic), list_to_binary(Content)};
-      _OtherType ->
-        {RoutingKey, list_to_binary(Msg)}
-    end,
-
+send_msg(ExchangeStr, RoutingKeyStr, MsgStr) ->
   %% start a connection
   %% default amqp_params_network host is localhost
   {ok, Connection} = amqp_connection:start(#amqp_params_network{}),
   {ok, Channel} = amqp_connection:open_channel(Connection),
 
-  %% To send/publish a message
-  %% publish(Channel, Exchange, Routing Key, Payload)
-  Declare = #'exchange.declare'{exchange = Exchange,
-                                type = Type},
-  amqp_channel:call(Channel, Declare),
+  Exchange = list_to_binary(ExchangeStr),
+  RoutingKey = list_to_binary(RoutingKeyStr),
+  Msg = list_to_binary(MsgStr),
 
-  Publish = #'basic.publish'{exchange = Exchange, routing_key = RoutingKey_1},
-  amqp_channel:cast(Channel, Publish, #amqp_msg{payload = Payload}),
+  Publish = #'basic.publish'{exchange = Exchange, routing_key = RoutingKey},
+  amqp_channel:cast(Channel, Publish, #amqp_msg{payload = Msg}),
 
   amqp_channel:close(Channel),
   amqp_connection:close(Connection),
   ok.
 
+add_queue_to_exchange(Exchange, RoutingKey, Queue) ->
+  supervisor:start_child(list_to_atom(Exchange ++ "_exchange_handler"), [RoutingKey, Queue]).
+
+%% If queue not exist, create queue
+add_routing_key_to_queue(Exchange, RoutingKey, Queue) ->
+  Reply = gen_server:call(list_to_atom(Queue ++ "_queue_handler"),
+                  {add_routing_key_to_queue, list_to_binary(RoutingKey), list_to_binary(Queue)}),
+  ok.
 
 get_worker_info(Type) ->
   WorkerRef = get_worker_ref(Type),

@@ -11,26 +11,28 @@
 
 -behaviour(gen_server).
 
+-include_lib("amqp_client/include/amqp_client.hrl").
+
 %% API
--export([start_link/0]).
+-export([start_link/3]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2,
-         code_change/3]).
+  code_change/3]).
 
--define(SERVER, ?MODULE). 
+-define(SERVER, ?MODULE).
 
--record(queue_handler_state, {}).
+-record(queue_handler_state, {channel, exchange, routing_keys = [], queues = []}).
 
 %%%===================================================================
 %%% API
 %%%===================================================================
 
 %% @doc Spawns the server and registers the local name (unique)
--spec(start_link() ->
-    {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link() ->
-    gen_server:start_link({local, ?SERVER}, ?MODULE, [], []).
+start_link(Exchange, RoutingKey, Queue) ->
+  gen_server:start_link({local, list_to_atom(Queue ++ "_queue_handler")}, ?MODULE, [Exchange,
+                                                                                    list_to_binary(RoutingKey),
+                                                                                    list_to_binary(Queue)], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -39,41 +41,74 @@ start_link() ->
 %% @private
 %% @doc Initializes the server
 -spec(init(Args :: term()) ->
-    {ok, State :: #queue_handler_state{}} | {ok, State :: #queue_handler_state{}, timeout() | hibernate} |
-    {stop, Reason :: term()} | ignore).
-init([]) ->
-    {ok, #queue_handler_state{}}.
+  {ok, State :: #queue_handler_state{}} | {ok, State :: #queue_handler_state{}, timeout() | hibernate} |
+  {stop, Reason :: term()} | ignore).
+init([Exchange, RoutingKey, Queue]) ->
+  {ok, Connection} = amqp_connection:start(#amqp_params_network{}),
+  {ok, Channel} = amqp_connection:open_channel(Connection),
+  %% declare a queue
+  #'queue.declare_ok'{} = amqp_channel:call(Channel, #'queue.declare'{exclusive = true,
+                                                                      queue = Queue}),
+
+  %% binding to queue to routing key
+  Binding = #'queue.bind'{queue       = Queue,
+                          exchange    = Exchange,
+                          routing_key = RoutingKey},
+  amqp_channel:call(Channel, Binding),
+
+  amqp_channel:subscribe(Channel, #'basic.consume'{queue = Queue,
+                                                     no_ack = true}, self()),
+  io:format("Queue [~p] Waiting for logs. To exit press CTRL+C~n", [Queue]),
+  {ok, #queue_handler_state{channel = Channel, exchange = Exchange, routing_keys = [RoutingKey], queues = [Queue]}}.
 
 %% @private
 %% @doc Handling call messages
 -spec(handle_call(Request :: term(), From :: {pid(), Tag :: term()},
-        State :: #queue_handler_state{}) ->
-    {reply, Reply :: term(), NewState :: #queue_handler_state{}} |
-    {reply, Reply :: term(), NewState :: #queue_handler_state{}, timeout() | hibernate} |
-    {noreply, NewState :: #queue_handler_state{}} |
-    {noreply, NewState :: #queue_handler_state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), Reply :: term(), NewState :: #queue_handler_state{}} |
-    {stop, Reason :: term(), NewState :: #queue_handler_state{}}).
+    State :: #queue_handler_state{}) ->
+  {reply, Reply :: term(), NewState :: #queue_handler_state{}} |
+  {reply, Reply :: term(), NewState :: #queue_handler_state{}, timeout() | hibernate} |
+  {noreply, NewState :: #queue_handler_state{}} |
+  {noreply, NewState :: #queue_handler_state{}, timeout() | hibernate} |
+  {stop, Reason :: term(), Reply :: term(), NewState :: #queue_handler_state{}} |
+  {stop, Reason :: term(), NewState :: #queue_handler_state{}}).
+
+handle_call({add_routing_key_to_queue, RoutingKey, Queue}, _From,
+            State) ->
+  #queue_handler_state{channel = Channel, exchange = Exchange, routing_keys = RoutingKeys} = State,
+  %% binding to queue to routing key
+  Binding = #'queue.bind'{queue       = Queue,
+                          exchange    = Exchange,
+                          routing_key = RoutingKey},
+  amqp_channel:call(Channel, Binding),
+  {reply, [RoutingKey|RoutingKeys], State#queue_handler_state{routing_keys = [RoutingKey|RoutingKeys]}};
 handle_call(_Request, _From, State = #queue_handler_state{}) ->
-    {reply, ok, State}.
+  {reply, ok, State}.
 
 %% @private
 %% @doc Handling cast messages
 -spec(handle_cast(Request :: term(), State :: #queue_handler_state{}) ->
-    {noreply, NewState :: #queue_handler_state{}} |
-    {noreply, NewState :: #queue_handler_state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #queue_handler_state{}}).
+  {noreply, NewState :: #queue_handler_state{}} |
+  {noreply, NewState :: #queue_handler_state{}, timeout() | hibernate} |
+  {stop, Reason :: term(), NewState :: #queue_handler_state{}}).
+
+
 handle_cast(_Request, State = #queue_handler_state{}) ->
-    {noreply, State}.
+  {noreply, State}.
 
 %% @private
 %% @doc Handling all non call/cast messages
 -spec(handle_info(Info :: timeout() | term(), State :: #queue_handler_state{}) ->
-    {noreply, NewState :: #queue_handler_state{}} |
-    {noreply, NewState :: #queue_handler_state{}, timeout() | hibernate} |
-    {stop, Reason :: term(), NewState :: #queue_handler_state{}}).
+  {noreply, NewState :: #queue_handler_state{}} |
+  {noreply, NewState :: #queue_handler_state{}, timeout() | hibernate} |
+  {stop, Reason :: term(), NewState :: #queue_handler_state{}}).
+
+handle_info(#'basic.consume_ok'{}, State = #queue_handler_state{}) ->
+  {noreply, State};
+handle_info({#'basic.deliver'{routing_key = RoutingKey}, #amqp_msg{payload = Body}}, State) ->
+  io:format(" [x] ~p:~p~n", [RoutingKey, Body]),
+  {noreply, State};
 handle_info(_Info, State = #queue_handler_state{}) ->
-    {noreply, State}.
+  {noreply, State}.
 
 %% @private
 %% @doc This function is called by a gen_server when it is about to
@@ -81,17 +116,17 @@ handle_info(_Info, State = #queue_handler_state{}) ->
 %% necessary cleaning up. When it returns, the gen_server terminates
 %% with Reason. The return value is ignored.
 -spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
-        State :: #queue_handler_state{}) -> term()).
+    State :: #queue_handler_state{}) -> term()).
 terminate(_Reason, _State = #queue_handler_state{}) ->
-    ok.
+  ok.
 
 %% @private
 %% @doc Convert process state when code is changed
 -spec(code_change(OldVsn :: term() | {down, term()}, State :: #queue_handler_state{},
-        Extra :: term()) ->
-    {ok, NewState :: #queue_handler_state{}} | {error, Reason :: term()}).
+    Extra :: term()) ->
+  {ok, NewState :: #queue_handler_state{}} | {error, Reason :: term()}).
 code_change(_OldVsn, State = #queue_handler_state{}, _Extra) ->
-    {ok, State}.
+  {ok, State}.
 
 %%%===================================================================
 %%% Internal functions
