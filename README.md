@@ -18,7 +18,6 @@ Each exchange is a running process supervise by `rabbit_sup.erl`.
 The exchange types and name are get from `config/sys.config`
 
 For example with "direct" exchange: `[{name, <<"direct">>}, {type, <<"direct">>}, {process, "direct_exchange_handler"}]`
-<<<<<<< HEAD
  
 ## Usage
 Add a queue to exchange. A child process will be spawned and manage by exchange process
