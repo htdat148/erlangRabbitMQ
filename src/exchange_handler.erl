@@ -60,7 +60,7 @@ init([Name, Type]) ->
 
   AChild = #{id => queue_handler,
              start => {queue_handler, start_link, [Name]},
-             restart => permanent,
+             restart => transient,
              shutdown => brutal_kill,
              type => worker,
              modules => [queue_handler]},

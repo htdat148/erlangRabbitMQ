@@ -22,7 +22,7 @@
 
 -define(SERVER, ?MODULE).
 
--record(queue_handler_state, {channel, exchange, routing_keys = [], queues = []}).
+-record(queue_handler_state, {channel, exchange, routing_keys = [], queue = []}).
 
 %%%===================================================================
 %%% API
@@ -59,7 +59,7 @@ init([Exchange, Queue]) ->
   amqp_channel:subscribe(Channel, #'basic.consume'{queue = Queue,
                                                      no_ack = true}, self()),
   io:format("Queue [~p] Waiting for logs. To exit press CTRL+C~n", [Queue]),
-  {ok, #queue_handler_state{channel = Channel, exchange = Exchange, queues = [Queue]}}.
+  {ok, #queue_handler_state{channel = Channel, exchange = Exchange, queue = Queue}}.
 
 %% @private
 %% @doc Handling call messages
@@ -139,7 +139,10 @@ handle_info(_Info, State = #queue_handler_state{}) ->
 %% with Reason. The return value is ignored.
 -spec(terminate(Reason :: (normal | shutdown | {shutdown, term()} | term()),
     State :: #queue_handler_state{}) -> term()).
-terminate(_Reason, _State = #queue_handler_state{}) ->
+terminate(normal, #queue_handler_state{channel = Channel, queue = Queue} = _State) ->
+  Delete = #'queue.delete'{queue = Queue},
+  #'queue.delete_ok'{} = amqp_channel:call(Channel, Delete),
+  io:format("Queue [~p] is terminated", [Queue]),
   ok.
 
 %% @private

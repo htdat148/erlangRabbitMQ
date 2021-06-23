@@ -14,7 +14,7 @@
 %% API
 -export([send_msg/3, add_queue_to_exchange/2,
          bind_routing_key_to_queue/2, get_queue_info/1,
-         unbind_routing_key_to_queue/2]).
+         unbind_routing_key_to_queue/2, remove_queue/1]).
 
 %% this function is used to send msg to default exchange
 %% msg is atom for direct and fanout types
@@ -54,6 +54,9 @@ unbind_routing_key_to_queue(RoutingKeys, Queue) ->
 get_queue_info(Queue) ->
   Reply = gen_server:call(list_to_atom(Queue ++ "_queue_handler"), get_queue_info),
   Reply.
+
+remove_queue(Queue) ->
+  gen_server:stop(list_to_atom(Queue ++ "_queue_handler"), normal, 10).
 
 str_to_bin(List) ->
   lists:map(fun(X) -> list_to_binary(X) end, List).
