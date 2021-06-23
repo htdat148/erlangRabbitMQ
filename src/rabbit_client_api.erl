@@ -14,7 +14,8 @@
 %% API
 -export([send_msg/3, add_queue_to_exchange/2,
          bind_routing_key_to_queue/2, get_queue_info/1,
-         unbind_routing_key_to_queue/2, remove_queue/1]).
+         unbind_routing_key_to_queue/2, remove_queue/1,
+         remove_exchange/1]).
 
 %% this function is used to send msg to default exchange
 %% msg is atom for direct and fanout types
@@ -57,6 +58,13 @@ get_queue_info(Queue) ->
 
 remove_queue(Queue) ->
   gen_server:stop(list_to_atom(Queue ++ "_queue_handler"), normal, 10).
+
+remove_exchange(Exchange) ->
+  {ok, Connection} = amqp_connection:start(#amqp_params_network{}),
+  {ok, Channel} = amqp_connection:open_channel(Connection),
+  Delete = #'exchange.delete'{exchange = list_to_binary(Exchange)},
+  #'exchange.delete_ok'{} = amqp_channel:call(Channel, Delete),
+  supervisor:terminate_child(rabbit_sup, list_to_atom(Exchange ++ "_exchange_handler")).
 
 str_to_bin(List) ->
   lists:map(fun(X) -> list_to_binary(X) end, List).
